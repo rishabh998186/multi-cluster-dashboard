@@ -9,11 +9,10 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/css/styles.css">
-    <script src="https://unpkg.com/htmx.org@1.9.10"></script>
     <script src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 </head>
-<body x-data="{ darkMode: true }" :class="darkMode ? 'dark' : ''">
+<body x-data="themeManager()" :class="darkMode ? '' : 'light'">
     <div class="app-container">
         <!-- Navigation Header -->
         <nav class="main-nav">
@@ -26,7 +25,7 @@
                 <a href="/alerts" class="nav-link">Alerts</a>
             </div>
             <div class="nav-actions">
-                <button @click="darkMode = !darkMode" class="theme-toggle" :title="darkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'">
+                <button @click="toggle()" class="theme-toggle" :title="darkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'">
                     <span x-show="darkMode">☀️</span>
                     <span x-show="!darkMode">🌙</span>
                 </button>
@@ -40,12 +39,8 @@
                 <p class="page-subtitle">Real-time health monitoring across all Kubernetes clusters</p>
             </div>
 
-            <!-- Cluster Cards Grid with HTMX polling -->
-            <div id="clusters-container" 
-                 hx-get="/api/clusters" 
-                 hx-trigger="load, every 5s" 
-                 hx-swap="innerHTML"
-                 class="clusters-grid">
+            <!-- Cluster Cards Grid -->
+            <div id="clusters-container" class="clusters-grid">
                 <div class="loading-state">
                     <div class="spinner"></div>
                     <p>Loading clusters...</p>
@@ -58,11 +53,15 @@
                 <div class="charts-grid">
                     <div class="chart-card">
                         <h3>CPU Usage</h3>
-                        <canvas id="cpuChart"></canvas>
+                        <div class="chart-container">
+                            <canvas id="cpuChart"></canvas>
+                        </div>
                     </div>
                     <div class="chart-card">
                         <h3>Memory Usage</h3>
-                        <canvas id="memoryChart"></canvas>
+                        <div class="chart-container">
+                            <canvas id="memoryChart"></canvas>
+                        </div>
                     </div>
                 </div>
             </section>
@@ -75,23 +74,83 @@
     </div>
 
     <script>
+        // ===== Theme Manager =====
+        function themeManager() {
+            return {
+                darkMode: localStorage.getItem('darkMode') !== 'false',
+                toggle() {
+                    this.darkMode = !this.darkMode;
+                    localStorage.setItem('darkMode', this.darkMode);
+                    this.updateChartColors();
+                },
+                updateChartColors() {
+                    const textColor = this.darkMode ? 'rgba(255, 255, 255, 0.8)' : 'rgba(15, 23, 42, 0.8)';
+                    const gridColor = this.darkMode ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)';
+                    [cpuChart, memoryChart].forEach(chart => {
+                        if (!chart) return;
+                        chart.options.plugins.legend.labels.color = textColor;
+                        chart.options.scales.y.ticks.color = textColor;
+                        chart.options.scales.y.grid.color = gridColor;
+                        chart.options.scales.x.ticks.color = textColor;
+                        chart.options.scales.x.grid.color = gridColor;
+                        chart.update('none');
+                    });
+                }
+            };
+        }
+
         let cpuChart = null;
         let memoryChart = null;
+        let pollTimer = null;
 
-        // Initialize charts
+        // ===== Initialize on DOM ready =====
         document.addEventListener('DOMContentLoaded', function() {
             initCharts();
+            fetchClusters();
+            // Poll every 5 seconds
+            pollTimer = setInterval(fetchClusters, 5000);
         });
 
+        function getChartColors() {
+            const isDark = !document.body.classList.contains('light');
+            return {
+                text: isDark ? 'rgba(255, 255, 255, 0.8)' : 'rgba(15, 23, 42, 0.8)',
+                grid: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)',
+            };
+        }
+
         function initCharts() {
+            const colors = getChartColors();
             const chartOptions = {
                 responsive: true,
                 maintainAspectRatio: false,
+                animation: {
+                    duration: 600,
+                    easing: 'easeOutQuart'
+                },
                 plugins: {
                     legend: {
                         position: 'bottom',
                         labels: {
-                            color: 'rgba(255, 255, 255, 0.8)'
+                            color: colors.text,
+                            padding: 20,
+                            usePointStyle: true,
+                            pointStyleWidth: 10,
+                            font: { family: 'Outfit', size: 13, weight: '500' }
+                        }
+                    },
+                    tooltip: {
+                        backgroundColor: 'rgba(17, 24, 39, 0.9)',
+                        titleFont: { family: 'Outfit', size: 14, weight: '600' },
+                        bodyFont: { family: 'Outfit', size: 13 },
+                        borderColor: 'rgba(255,255,255,0.1)',
+                        borderWidth: 1,
+                        cornerRadius: 8,
+                        padding: 12,
+                        callbacks: {
+                            label: function(context) {
+                                return context.dataset.label + ': ' + context.parsed.y.toFixed(1) + '%';
+                            }
                         }
                     }
                 },
@@ -99,12 +158,20 @@
                     y: {
                         beginAtZero: true,
                         max: 100,
-                        ticks: { color: 'rgba(255, 255, 255, 0.6)' },
-                        grid: { color: 'rgba(255, 255, 255, 0.1)' }
+                        ticks: {
+                            color: colors.text,
+                            font: { family: 'Outfit', size: 12 },
+                            callback: val => val + '%'
+                        },
+                        grid: { color: colors.grid }
                     },
                     x: {
-                        ticks: { color: 'rgba(255, 255, 255, 0.6)' },
-                        grid: { color: 'rgba(255, 255, 255, 0.1)' }
+                        ticks: {
+                            color: colors.text,
+                            font: { family: 'Outfit', size: 12 },
+                            maxRotation: 0
+                        },
+                        grid: { color: colors.grid }
                     }
                 }
             };
@@ -119,9 +186,23 @@
                         datasets: [{
                             label: 'CPU Usage (%)',
                             data: [],
-                            backgroundColor: 'rgba(99, 102, 241, 0.6)',
-                            borderColor: 'rgb(99, 102, 241)',
-                            borderWidth: 1
+                            backgroundColor: [
+                                'rgba(99, 102, 241, 0.7)',
+                                'rgba(139, 92, 246, 0.7)',
+                                'rgba(168, 85, 247, 0.7)',
+                                'rgba(192, 132, 252, 0.7)',
+                                'rgba(129, 140, 248, 0.7)',
+                            ],
+                            borderColor: [
+                                'rgb(99, 102, 241)',
+                                'rgb(139, 92, 246)',
+                                'rgb(168, 85, 247)',
+                                'rgb(192, 132, 252)',
+                                'rgb(129, 140, 248)',
+                            ],
+                            borderWidth: 2,
+                            borderRadius: 8,
+                            borderSkipped: false,
                         }]
                     },
                     options: chartOptions
@@ -138,9 +219,23 @@
                         datasets: [{
                             label: 'Memory Usage (%)',
                             data: [],
-                            backgroundColor: 'rgba(236, 72, 153, 0.6)',
-                            borderColor: 'rgb(236, 72, 153)',
-                            borderWidth: 1
+                            backgroundColor: [
+                                'rgba(236, 72, 153, 0.7)',
+                                'rgba(244, 63, 94, 0.7)',
+                                'rgba(251, 113, 133, 0.7)',
+                                'rgba(252, 165, 165, 0.7)',
+                                'rgba(249, 115, 22, 0.7)',
+                            ],
+                            borderColor: [
+                                'rgb(236, 72, 153)',
+                                'rgb(244, 63, 94)',
+                                'rgb(251, 113, 133)',
+                                'rgb(252, 165, 165)',
+                                'rgb(249, 115, 22)',
+                            ],
+                            borderWidth: 2,
+                            borderRadius: 8,
+                            borderSkipped: false,
                         }]
                     },
                     options: chartOptions
@@ -148,89 +243,107 @@
             }
         }
 
-        // Handle HTMX response to render cluster cards
-        document.body.addEventListener('htmx:afterSwap', function(event) {
-            if (event.detail.target.id === 'clusters-container') {
-                renderClusterCards(event.detail.xhr.response);
-            }
-        });
-
-        function renderClusterCards(jsonResponse) {
-            try {
-                const data = JSON.parse(jsonResponse);
-                const container = document.getElementById('clusters-container');
-                
-                if (!data.clusters || data.clusters.length === 0) {
-                    container.innerHTML = '<div class="empty-state"><p>No clusters configured. Check your cluster configuration.</p></div>';
-                    return;
-                }
-
-                let html = '';
-                data.clusters.forEach(cluster => {
-                    const statusClass = cluster.status.toLowerCase();
-                    html += `
-                        <a href="/cluster/${cluster.name}" class="cluster-card ${statusClass}">
-                            <div class="card-header">
-                                <div class="cluster-info">
-                                    <h3>${cluster.displayName || cluster.name}</h3>
-                                    <span class="cluster-context">${cluster.context}</span>
-                                </div>
-                                <span class="status-badge ${statusClass}">${cluster.status}</span>
+        // ===== Fetch clusters via plain fetch (no HTMX) =====
+        function fetchClusters() {
+            fetch('/api/clusters')
+                .then(res => {
+                    if (!res.ok) throw new Error('HTTP ' + res.status);
+                    return res.json();
+                })
+                .then(data => renderClusterCards(data))
+                .catch(err => {
+                    console.error('Failed to fetch clusters:', err);
+                    const container = document.getElementById('clusters-container');
+                    if (container && container.querySelector('.loading-state')) {
+                        container.innerHTML = `
+                            <div class="empty-state">
+                                <div class="empty-icon">⚠️</div>
+                                <h3>Connection Error</h3>
+                                <p>Could not reach the API server. Retrying...</p>
                             </div>
-                            <div class="card-body">
-                                <div class="metrics-grid">
-                                    <div class="metric">
-                                        <span class="metric-label">CPU</span>
-                                        <div class="metric-bar">
-                                            <div class="metric-fill cpu" style="width: ${Math.min(cluster.cpuUsage, 100)}%"></div>
-                                        </div>
-                                        <span class="metric-value">${cluster.cpuUsage.toFixed(1)}%</span>
-                                    </div>
-                                    <div class="metric">
-                                        <span class="metric-label">Memory</span>
-                                        <div class="metric-bar">
-                                            <div class="metric-fill memory" style="width: ${Math.min(cluster.memoryUsage, 100)}%"></div>
-                                        </div>
-                                        <span class="metric-value">${cluster.memoryUsage.toFixed(1)}%</span>
-                                    </div>
-                                </div>
-                                <div class="stats-row">
-                                    <div class="stat">
-                                        <span class="stat-icon">📦</span>
-                                        <span class="stat-value">${cluster.nodeCount}</span>
-                                        <span class="stat-label">Nodes</span>
-                                    </div>
-                                    <div class="stat">
-                                        <span class="stat-icon">🔷</span>
-                                        <span class="stat-value">${cluster.podCount}</span>
-                                        <span class="stat-label">Pods</span>
-                                    </div>
-                                </div>
-                            </div>
-                        </a>
-                    `;
+                        `;
+                    }
                 });
-                container.innerHTML = html;
+        }
 
-                // Update Overview Charts
-                if (cpuChart && memoryChart) {
-                    const activeClusters = data.clusters.filter(c => c.reachable);
-                    
-                    const labels = activeClusters.map(c => c.displayName || c.name);
-                    const cpuData = activeClusters.map(c => c.cpuUsage);
-                    const memData = activeClusters.map(c => c.memoryUsage);
+        function renderClusterCards(data) {
+            const container = document.getElementById('clusters-container');
+            
+            if (!data.clusters || data.clusters.length === 0) {
+                container.innerHTML = `
+                    <div class="empty-state">
+                        <div class="empty-icon">📡</div>
+                        <h3>No Clusters Online</h3>
+                        <p>No reachable clusters found. Check your kubeconfig and cluster connectivity.</p>
+                    </div>
+                `;
+                // Clear charts
+                if (cpuChart) { cpuChart.data.labels = []; cpuChart.data.datasets[0].data = []; cpuChart.update(); }
+                if (memoryChart) { memoryChart.data.labels = []; memoryChart.data.datasets[0].data = []; memoryChart.update(); }
+                return;
+            }
 
-                    cpuChart.data.labels = labels;
-                    cpuChart.data.datasets[0].data = cpuData;
-                    cpuChart.update();
+            let html = '';
+            data.clusters.forEach(cluster => {
+                const statusClass = cluster.status.toLowerCase();
+                html += `
+                    <a href="/cluster/${cluster.name}" class="cluster-card ${statusClass}">
+                        <div class="card-header">
+                            <div class="cluster-info">
+                                <h3>${cluster.displayName || cluster.name}</h3>
+                                <span class="cluster-context">${cluster.context}</span>
+                            </div>
+                            <span class="status-badge ${statusClass}">${cluster.status}</span>
+                        </div>
+                        <div class="card-body">
+                            <div class="metrics-grid">
+                                <div class="metric">
+                                    <span class="metric-label">CPU</span>
+                                    <div class="metric-bar">
+                                        <div class="metric-fill cpu" style="width: ${Math.min(cluster.cpuUsage, 100)}%"></div>
+                                    </div>
+                                    <span class="metric-value">${cluster.cpuUsage.toFixed(1)}%</span>
+                                </div>
+                                <div class="metric">
+                                    <span class="metric-label">Memory</span>
+                                    <div class="metric-bar">
+                                        <div class="metric-fill memory" style="width: ${Math.min(cluster.memoryUsage, 100)}%"></div>
+                                    </div>
+                                    <span class="metric-value">${cluster.memoryUsage.toFixed(1)}%</span>
+                                </div>
+                            </div>
+                            <div class="stats-row">
+                                <div class="stat">
+                                    <span class="stat-icon">📦</span>
+                                    <span class="stat-value">${cluster.nodeCount}</span>
+                                    <span class="stat-label">Nodes</span>
+                                </div>
+                                <div class="stat">
+                                    <span class="stat-icon">🔷</span>
+                                    <span class="stat-value">${cluster.podCount}</span>
+                                    <span class="stat-label">Pods</span>
+                                </div>
+                            </div>
+                        </div>
+                    </a>
+                `;
+            });
+            container.innerHTML = html;
 
-                    memoryChart.data.labels = labels;
-                    memoryChart.data.datasets[0].data = memData;
-                    memoryChart.update();
-                }
+            // Update Charts with live data
+            if (cpuChart && memoryChart) {
+                const activeClusters = data.clusters.filter(c => c.reachable);
+                const labels = activeClusters.map(c => c.displayName || c.name);
+                const cpuData = activeClusters.map(c => c.cpuUsage);
+                const memData = activeClusters.map(c => c.memoryUsage);
 
-            } catch (e) {
-                console.error('Failed to parse cluster data:', e);
+                cpuChart.data.labels = labels;
+                cpuChart.data.datasets[0].data = cpuData;
+                cpuChart.update();
+
+                memoryChart.data.labels = labels;
+                memoryChart.data.datasets[0].data = memData;
+                memoryChart.update();
             }
         }
     </script>

@@ -5,12 +5,14 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{ .title }}</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/css/styles.css">
-    <script src="https://unpkg.com/htmx.org@1.9.10"></script>
     <script src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
 </head>
 
-<body x-data="{ darkMode: true }" :class="darkMode ? 'dark' : ''">
+<body x-data="themeManager()" :class="darkMode ? '' : 'light'">
     <div class="app-container">
         <!-- Navigation Header -->
         <nav class="main-nav">
@@ -23,7 +25,7 @@
                 <a href="/alerts" class="nav-link active">Alerts</a>
             </div>
             <div class="nav-actions">
-                <button @click="darkMode = !darkMode" class="theme-toggle">
+                <button @click="toggle()" class="theme-toggle" :title="darkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'">
                     <span x-show="darkMode">☀️</span>
                     <span x-show="!darkMode">🌙</span>
                 </button>
@@ -33,13 +35,12 @@
         <!-- Main Content -->
         <main class="main-content">
             <div class="page-header">
-                <h1>Alerts</h1>
+                <h1 class="text-gradient">Alerts</h1>
                 <p class="page-subtitle">Active alerts across all clusters</p>
             </div>
 
             <!-- Alerts List -->
-            <div id="alerts-container" hx-get="/api/alerts" hx-trigger="load, every 10s" hx-swap="innerHTML"
-                class="alerts-list">
+            <div id="alerts-container" class="alerts-list">
                 <div class="loading-state">
                     <div class="spinner"></div>
                     <p>Loading alerts...</p>
@@ -54,52 +55,75 @@
     </div>
 
     <script>
-        document.body.addEventListener('htmx:afterSwap', function (event) {
-            if (event.detail.target.id === 'alerts-container') {
-                renderAlerts(event.detail.xhr.response);
-            }
+        // ===== Theme Manager =====
+        function themeManager() {
+            return {
+                darkMode: localStorage.getItem('darkMode') !== 'false',
+                toggle() {
+                    this.darkMode = !this.darkMode;
+                    localStorage.setItem('darkMode', this.darkMode);
+                }
+            };
+        }
+
+        let pollTimer = null;
+
+        document.addEventListener('DOMContentLoaded', function() {
+            fetchAlerts();
+            pollTimer = setInterval(fetchAlerts, 10000);
         });
 
-        function renderAlerts(jsonResponse) {
-            try {
-                const data = JSON.parse(jsonResponse);
-                const container = document.getElementById('alerts-container');
+        function fetchAlerts() {
+            fetch('/api/alerts')
+                .then(res => {
+                    if (!res.ok) throw new Error('HTTP ' + res.status);
+                    return res.json();
+                })
+                .then(data => renderAlerts(data))
+                .catch(err => {
+                    console.error('Failed to fetch alerts:', err);
+                });
+        }
 
-                if (!data.alerts || data.alerts.length === 0) {
-                    container.innerHTML = `
-                        <div class="empty-state success">
-                            <div class="empty-icon">✅</div>
-                            <h3>All Clear!</h3>
-                            <p>No active alerts. All clusters are operating normally.</p>
-                        </div>
-                    `;
-                    return;
+        function renderAlerts(data) {
+            const container = document.getElementById('alerts-container');
+
+            if (!data.alerts || data.alerts.length === 0) {
+                container.innerHTML = `
+                    <div class="empty-state success">
+                        <div class="empty-icon">✅</div>
+                        <h3>All Clear!</h3>
+                        <p>No active alerts. All clusters are operating normally.</p>
+                    </div>
+                `;
+                return;
+            }
+
+            let html = '';
+            data.alerts.forEach(alert => {
+                const severityClass = alert.severity.toLowerCase();
+                const icon = alert.severity === 'Critical' ? '🚨' : '⚠️';
+                let timestamp = '';
+                if (alert.timestamp) {
+                    const d = new Date(alert.timestamp);
+                    timestamp = isNaN(d.getTime()) ? '' : d.toLocaleString();
                 }
 
-                let html = '';
-                data.alerts.forEach(alert => {
-                    const severityClass = alert.severity.toLowerCase();
-                    const icon = alert.severity === 'Critical' ? '🚨' : '⚠️';
-                    const timestamp = new Date(alert.timestamp).toLocaleString();
-
-                    html += `
-                        <div class="alert-item ${severityClass}">
-                            <div class="alert-icon">${icon}</div>
-                            <div class="alert-content">
-                                <div class="alert-header">
-                                    <span class="alert-cluster">${alert.cluster}</span>
-                                    <span class="alert-severity ${severityClass}">${alert.severity}</span>
-                                </div>
-                                <p class="alert-message">${alert.message}</p>
-                                <span class="alert-time">${timestamp}</span>
+                html += `
+                    <div class="alert-item ${severityClass}">
+                        <div class="alert-icon">${icon}</div>
+                        <div class="alert-content">
+                            <div class="alert-header">
+                                <span class="alert-cluster">${alert.cluster}</span>
+                                <span class="alert-severity ${severityClass}">${alert.severity}</span>
                             </div>
+                            <p class="alert-message">${alert.message}</p>
+                            ${timestamp ? `<span class="alert-time">${timestamp}</span>` : ''}
                         </div>
-                    `;
-                });
-                container.innerHTML = html;
-            } catch (e) {
-                console.error('Failed to parse alerts:', e);
-            }
+                    </div>
+                `;
+            });
+            container.innerHTML = html;
         }
     </script>
 </body>

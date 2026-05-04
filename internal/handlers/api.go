@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -247,31 +248,76 @@ func (h *APIHandler) GetClusterPods(c *gin.Context) {
 func (h *APIHandler) GetAlerts(c *gin.Context) {
 	clusters := h.registry.GetAll()
 	var alerts []gin.H
+	now := time.Now()
 
 	for _, cl := range clusters {
+		// Skip unreachable clusters entirely — only alert on active clusters
 		if !cl.Reachable {
-			alerts = append(alerts, gin.H{
-				"cluster":  cl.Name,
-				"severity": "Critical",
-				"message":  "Cluster is unreachable",
-			})
 			continue
 		}
+
+		// Check for failed/crashing pods
 		pods, err := cl.Clientset.CoreV1().Pods("").List(context.Background(), metav1.ListOptions{})
-		if err == nil {
-			failed := 0
-			for _, p := range pods.Items {
-				if p.Status.Phase == "Failed" || p.Status.Phase == "CrashLoopBackOff" {
-					failed++
+		if err != nil {
+			continue // Can't list pods, skip silently
+		}
+
+		failed := 0
+		var crashPods []string
+		for _, p := range pods.Items {
+			if p.Status.Phase == "Failed" {
+				failed++
+				if len(crashPods) < 3 {
+					crashPods = append(crashPods, p.Namespace+"/"+p.Name)
 				}
 			}
-			if failed > 0 {
-				alerts = append(alerts, gin.H{
-					"cluster":  cl.Name,
-					"severity": "Warning",
-					"message":  "Pod(s) in Failed state",
-				})
+			for _, cs := range p.Status.ContainerStatuses {
+				if cs.State.Waiting != nil && cs.State.Waiting.Reason == "CrashLoopBackOff" {
+					failed++
+					if len(crashPods) < 3 {
+						crashPods = append(crashPods, p.Namespace+"/"+p.Name)
+					}
+				}
 			}
+		}
+		if failed > 0 {
+			msg := fmt.Sprintf("%d pod(s) in failed/crash state", failed)
+			if len(crashPods) > 0 {
+				msg += " (e.g. " + crashPods[0] + ")"
+			}
+			alerts = append(alerts, gin.H{
+				"cluster":   cl.DisplayName,
+				"severity":  "Warning",
+				"message":   msg,
+				"timestamp": now.Format(time.RFC3339),
+			})
+		}
+
+		// Check resource pressure on active clusters
+		cpu, mem := cl.GetUtilization()
+		if cpu > 80 {
+			severity := "Warning"
+			if cpu > 95 {
+				severity = "Critical"
+			}
+			alerts = append(alerts, gin.H{
+				"cluster":   cl.DisplayName,
+				"severity":  severity,
+				"message":   fmt.Sprintf("High CPU usage: %.1f%%", cpu),
+				"timestamp": now.Format(time.RFC3339),
+			})
+		}
+		if mem > 80 {
+			severity := "Warning"
+			if mem > 95 {
+				severity = "Critical"
+			}
+			alerts = append(alerts, gin.H{
+				"cluster":   cl.DisplayName,
+				"severity":  severity,
+				"message":   fmt.Sprintf("High memory usage: %.1f%%", mem),
+				"timestamp": now.Format(time.RFC3339),
+			})
 		}
 	}
 

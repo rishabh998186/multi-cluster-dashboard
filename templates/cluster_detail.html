@@ -9,12 +9,11 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/css/styles.css">
-    <script src="https://unpkg.com/htmx.org@1.9.10"></script>
     <script src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 </head>
 
-<body x-data="{ darkMode: true, activeTab: 'nodes' }" :class="darkMode ? 'dark' : ''">
+<body x-data="{ ...themeManager(), activeTab: 'nodes' }" :class="darkMode ? '' : 'light'">
     <div class="app-container">
         <!-- Navigation Header -->
         <nav class="main-nav">
@@ -27,7 +26,7 @@
                 <a href="/alerts" class="nav-link">Alerts</a>
             </div>
             <div class="nav-actions">
-                <button @click="darkMode = !darkMode" class="theme-toggle">
+                <button @click="toggle()" class="theme-toggle" :title="darkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'">
                     <span x-show="darkMode">☀️</span>
                     <span x-show="!darkMode">🌙</span>
                 </button>
@@ -45,8 +44,7 @@
 
             <div class="page-header">
                 <h1 class="text-gradient">{{ .clusterName }}</h1>
-                <div id="cluster-status" hx-get="/api/clusters/{{ .clusterName }}" hx-trigger="load, every 5s"
-                    hx-swap="innerHTML">
+                <div id="cluster-status">
                     <span class="status-badge loading">Loading...</span>
                 </div>
             </div>
@@ -98,8 +96,7 @@
 
             <!-- Nodes Tab -->
             <div x-show="activeTab === 'nodes'" class="tab-content">
-                <div id="nodes-table" hx-get="/api/clusters/{{ .clusterName }}/nodes" hx-trigger="load, every 10s"
-                    hx-swap="innerHTML">
+                <div id="nodes-table">
                     <div class="loading-state">
                         <div class="spinner"></div>
                         <p>Loading nodes...</p>
@@ -109,8 +106,7 @@
 
             <!-- Pods Tab -->
             <div x-show="activeTab === 'pods'" class="tab-content">
-                <div id="pods-table" hx-get="/api/clusters/{{ .clusterName }}/pods" hx-trigger="load, every 10s"
-                    hx-swap="innerHTML">
+                <div id="pods-table">
                     <div class="loading-state">
                         <div class="spinner"></div>
                         <p>Loading pods...</p>
@@ -122,7 +118,9 @@
             <div x-show="activeTab === 'metrics'" class="tab-content">
                 <div class="chart-card large">
                     <h3>Resource Usage (24h)</h3>
-                    <canvas id="historyChart"></canvas>
+                    <div class="chart-container">
+                        <canvas id="historyChart"></canvas>
+                    </div>
                 </div>
             </div>
         </main>
@@ -134,31 +132,53 @@
     </div>
 
     <script>
+        // ===== Theme Manager =====
+        function themeManager() {
+            return {
+                darkMode: localStorage.getItem('darkMode') !== 'false',
+                toggle() {
+                    this.darkMode = !this.darkMode;
+                    localStorage.setItem('darkMode', this.darkMode);
+                }
+            };
+        }
+
         const clusterName = '{{ .clusterName }}';
         let historyChart = null;
 
         document.addEventListener('DOMContentLoaded', function () {
             initHistoryChart();
+            fetchClusterData();
+            setInterval(fetchClusterData, 5000);
+        });
+
+        function fetchClusterData() {
+            // Fetch cluster details
+            fetch(`/api/clusters/${clusterName}`)
+                .then(res => res.json())
+                .then(data => updateClusterStats(data))
+                .catch(console.error);
+
+            // Fetch nodes
+            fetch(`/api/clusters/${clusterName}/nodes`)
+                .then(res => res.json())
+                .then(data => renderNodesTable(data))
+                .catch(console.error);
+
+            // Fetch pods
+            fetch(`/api/clusters/${clusterName}/pods`)
+                .then(res => res.json())
+                .then(data => renderPodsTable(data))
+                .catch(console.error);
+
+            // Fetch history
             loadClusterHistory();
-        });
+        }
 
-        // Handle cluster details response
-        document.body.addEventListener('htmx:afterSwap', function (event) {
-            if (event.detail.target.id === 'cluster-status') {
-                updateClusterStats(event.detail.xhr.response);
-            }
-            if (event.detail.target.id === 'nodes-table') {
-                renderNodesTable(event.detail.xhr.response);
-            }
-            if (event.detail.target.id === 'pods-table') {
-                renderPodsTable(event.detail.xhr.response);
-            }
-        });
-
-        function updateClusterStats(jsonResponse) {
+        function updateClusterStats(data) {
             try {
-                const data = JSON.parse(jsonResponse);
                 const cluster = data.cluster;
+                if (!cluster) return;
 
                 document.getElementById('cluster-status').innerHTML =
                     `<span class="status-badge ${cluster.status.toLowerCase()}">${cluster.status}</span>`;
@@ -167,13 +187,12 @@
                 document.getElementById('node-count').textContent = cluster.nodeCount;
                 document.getElementById('pod-count').textContent = cluster.podCount;
             } catch (e) {
-                console.error('Failed to parse cluster details:', e);
+                console.error('Failed to update cluster stats:', e);
             }
         }
 
-        function renderNodesTable(jsonResponse) {
+        function renderNodesTable(data) {
             try {
-                const data = JSON.parse(jsonResponse);
                 const container = document.getElementById('nodes-table');
 
                 if (!data.nodes || data.nodes.length === 0) {
@@ -215,13 +234,12 @@
                 html += '</tbody></table>';
                 container.innerHTML = html;
             } catch (e) {
-                console.error('Failed to parse nodes:', e);
+                console.error('Failed to render nodes:', e);
             }
         }
 
-        function renderPodsTable(jsonResponse) {
+        function renderPodsTable(data) {
             try {
-                const data = JSON.parse(jsonResponse);
                 const container = document.getElementById('pods-table');
 
                 if (!data.pods || data.pods.length === 0) {
@@ -262,7 +280,7 @@
                 html += '</tbody></table>';
                 container.innerHTML = html;
             } catch (e) {
-                console.error('Failed to parse pods:', e);
+                console.error('Failed to render pods:', e);
             }
         }
 

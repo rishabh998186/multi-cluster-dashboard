@@ -4,7 +4,7 @@
 
 ![Go](https://img.shields.io/badge/Go-1.21+-00ADD8?style=for-the-badge&logo=go&logoColor=white)
 ![Kubernetes](https://img.shields.io/badge/Kubernetes-client--go-326CE5?style=for-the-badge&logo=kubernetes&logoColor=white)
-![HTMX](https://img.shields.io/badge/HTMX-1.9-36C?style=for-the-badge&logo=html5&logoColor=white)
+![Docker](https://img.shields.io/badge/Docker-shivmi-2496ED?style=for-the-badge&logo=docker&logoColor=white)
 ![SQLite](https://img.shields.io/badge/SQLite-GORM-003B57?style=for-the-badge&logo=sqlite&logoColor=white)
 ![License](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)
 
@@ -12,7 +12,7 @@
 
 No Prometheus. No Helm. No YAML config. Just run it and go.
 
-[Quick Start](#-quick-start) · [Features](#-features) · [Architecture](#-architecture) · [API Docs](#-api-endpoints) · [Tech Stack](#-tech-stack)
+[Quick Start](#-quick-start) · [Docker](#-run-with-docker) · [Features](#-features) · [Architecture](#-architecture) · [API Docs](#-api-endpoints)
 
 </div>
 
@@ -83,6 +83,44 @@ go run cmd/server/main.go
 Open **http://localhost:8080** in your browser.
 
 That's it. No config files to edit.
+
+---
+
+## 🐳 Run with Docker
+
+**Pull from Docker Hub:**
+
+```bash
+docker pull shivmi/multi-cluster-dashboard:latest
+```
+
+**Run it (mount your kubeconfig so it can discover clusters):**
+
+```bash
+docker run -d --name k8s-dashboard \
+  -p 8080:8080 \
+  -v ~/.kube/config:/root/.kube/config:ro \
+  shivmi/multi-cluster-dashboard:latest
+```
+
+Then open **http://localhost:8080** 🎉
+
+**With custom config and persistent data:**
+
+```bash
+docker run -d --name k8s-dashboard \
+  -p 8080:8080 \
+  -v ~/.kube/config:/root/.kube/config:ro \
+  -v ./my-clusters.yaml:/app/k8s-configs/clusters.yaml:ro \
+  -v dashboard-data:/app/data \
+  shivmi/multi-cluster-dashboard:latest
+```
+
+| Volume Mount | Purpose |
+|---|---|
+| `~/.kube/config:/root/.kube/config:ro` | **Required** — gives the dashboard access to your cluster contexts |
+| `/app/k8s-configs/clusters.yaml` | Optional — custom display name overrides |
+| `/app/data` | Optional — persist SQLite metrics history across restarts |
 
 ---
 
